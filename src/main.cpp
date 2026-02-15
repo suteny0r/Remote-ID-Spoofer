@@ -118,7 +118,7 @@ static void fill_uas_data(ODID_UAS_Data *uas, const char *basic_id,
     memset(uas, 0, sizeof(*uas));
 
     odid_initBasicIDData(&uas->BasicID[0]);
-    uas->BasicID[0].UAType = ODID_UATYPE_OTHER;
+    uas->BasicID[0].UAType = ODID_UATYPE_HELICOPTER_OR_MULTIROTOR;
     uas->BasicID[0].IDType = ODID_IDTYPE_SERIAL_NUMBER;
     strncpy(uas->BasicID[0].UASID, basic_id, ODID_ID_SIZE);
     uas->BasicID[0].UASID[ODID_ID_SIZE] = '\0';
