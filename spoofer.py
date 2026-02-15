@@ -38,6 +38,12 @@ def cleanup_boards():
             pass
 atexit.register(cleanup_boards)
 
+## Serial drain thread removed — no longer needed.
+## We removed the per-TX Serial.printf() from the ESP32 firmware,
+## so its USB CDC TX buffer no longer fills up during normal operation.
+## The drain thread was also accessing the serial port without board['lock'],
+## which could interfere with writes on Windows USB CDC.
+
 PATH_CSV = "paths.csv"
 try:
     with open(PATH_CSV, 'x', newline='') as f:
@@ -682,7 +688,7 @@ function applyVariations(lat,lng,alt){
 }
 
 function getTxInterval(){
-  var base=500;
+  var base=1000;
   if(!isOn('txJitter'))return base;
   var j=parseFloat(document.getElementById('txJitterRange').value);
   return base+(Math.random()-0.5)*2*j;
@@ -826,7 +832,7 @@ function animateSwarmDrones(){
     }else if(d.flightPath&&d.flightPath.length>1){
       var fp=d.flightPath,from=fp[d.simIndex],to=fp[(d.simIndex+1)%fp.length];
       var dx=to[0]-from[0],dy=to[1]-from[1],distM=Math.sqrt(dx*dx+dy*dy)*111111;
-      var advance=(liveSpeed*d.speedMult*0.016)/Math.max(distM,0.1);
+      var advance=(liveSpeed*d.speedMult*0.05)/Math.max(distM,0.1);
       d.segmentOffset+=advance;
       if(d.segmentOffset>=1){d.segmentOffset=0;d.simIndex=(d.simIndex+1)%fp.length;from=fp[d.simIndex];to=fp[(d.simIndex+1)%fp.length];}
       var t=d.segmentOffset;
@@ -835,10 +841,10 @@ function animateSwarmDrones(){
     }
   });
   updateSwarmMarkers();
-  swarmAnimFrame=requestAnimationFrame(animateSwarmDrones);
+  swarmAnimFrame=setTimeout(animateSwarmDrones,50);
 }
 
-function stopSwarmAnimation(){if(swarmAnimFrame){cancelAnimationFrame(swarmAnimFrame);swarmAnimFrame=null;}}
+function stopSwarmAnimation(){if(swarmAnimFrame){clearTimeout(swarmAnimFrame);swarmAnimFrame=null;}}
 
 function renderSwarmList(){
   var container=document.getElementById('swarmDroneList');
@@ -1093,7 +1099,7 @@ function moveSegment(idx,offset){
       droneMarker.setLatLng([lat,lng]);
       if(statusCircle)statusCircle.setLatLng([lat,lng]);
       segmentOffset=t;
-      requestAnimationFrame(step);
+      setTimeout(step,50);
     }
   })();
 }
@@ -1295,17 +1301,21 @@ def map_view():
     return resp
 
 def _write_one(board, data_str):
-    """Write to a single board with reconnect logic."""
+    """Write to a single board with reconnect logic.
+    NOTE: no ser.flush() — flush() blocks until the USB device acknowledges
+    all data, which can stall Flask's single-threaded request handler for
+    seconds on Windows USB CDC.  write() alone puts data into the OS buffer
+    and the USB driver sends it within 1ms (next USB frame)."""
     with board['lock']:
         if board['ser'] is None or not board['ser'].is_open:
             try:
-                board['ser'] = serial.Serial(board['port'], BAUD_RATE, timeout=1)
+                board['ser'] = serial.Serial(board['port'], BAUD_RATE, timeout=1,
+                                             write_timeout=1)
             except Exception:
                 board['ser'] = None
                 return False
         try:
             board['ser'].write((data_str + "\n").encode('ascii'))
-            board['ser'].flush()
             return True
         except Exception:
             try:
@@ -1313,9 +1323,9 @@ def _write_one(board, data_str):
             except Exception:
                 pass
             try:
-                board['ser'] = serial.Serial(board['port'], BAUD_RATE, timeout=1)
+                board['ser'] = serial.Serial(board['port'], BAUD_RATE, timeout=1,
+                                             write_timeout=1)
                 board['ser'].write((data_str + "\n").encode('ascii'))
-                board['ser'].flush()
                 return True
             except Exception:
                 board['ser'] = None

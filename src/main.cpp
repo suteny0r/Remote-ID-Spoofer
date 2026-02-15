@@ -424,7 +424,16 @@ void loop() {
                 }
             }
 
-            if (broadcastEnabled) update_ap_ssid();
+            // Only update AP SSID when basic_id changes — calling
+            // esp_wifi_set_config() on every serial message clobbers the
+            // vendor IE set by update_beacon_vendor_ie(), freezing beacon
+            // ODID data at its initial value while NAN frames update normally.
+            static char prev_ssid_id[ODID_ID_SIZE + 1] = {};
+            if (broadcastEnabled && strcmp(prev_ssid_id, g_basic_id) != 0) {
+                update_ap_ssid();
+                strncpy(prev_ssid_id, g_basic_id, ODID_ID_SIZE);
+                prev_ssid_id[ODID_ID_SIZE] = '\0';
+            }
 
             if (doc.containsKey("path")) {
                 JsonArray p = doc["path"].as<JsonArray>();
@@ -443,9 +452,12 @@ void loop() {
     if (millis() - lastTx >= TX_INTERVAL_MS) {
         lastTx = millis();
         inject_odid(g_basic_id, g_drone_lat, g_drone_lon, g_drone_alt, g_pilot_lat, g_pilot_lon);
-        heartbeatTick();
-        ledFlash(20);
-        const char *bstr = g_band_mode == 0 ? "2.4G" : g_band_mode == 1 ? "5G" : "DUAL";
-        Serial.printf("TX lat=%.4f lon=%.4f alt=%d band=%s\n", g_drone_lat, g_drone_lon, g_drone_alt, bstr);
+        // Non-blocking audio/visual TX feedback — no delay() calls here
+        // to keep the main loop responsive for serial position updates.
+        if (!buzzerMuted) tone(BUZZER_PIN, 2400, 15);  // LEDC auto-stops
+        ledOn();
     }
+
+    // Non-blocking LED off after 20ms flash
+    if (millis() - lastTx >= 20) ledOff();
 }
